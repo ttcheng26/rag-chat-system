@@ -79,9 +79,6 @@ def get_keywords_via_llm(query):
 
 
 def expand_keywords_by_intent(query, core_keywords):
-    """
-    保留極少量的通用擴充，主要依賴上面的 LLM
-    """
     expanded = list(core_keywords)
     
     # 針對年份做簡單處理 (Regex 抓取 112, 113, 2024 等)
@@ -110,11 +107,6 @@ def calculate_keyword_score(query_keywords, text):
     return score
 
 def advanced_reranker(query, documents, metadatas, distances, top_n=30, decay_rate=0.95, keywords=[]):
-    """
-    1. [Fix] 將字典 Key 'metadata' 更名為 'meta' 以配合 group_and_merge_results。
-    2. [Fix] 增加 None 值檢查，防止計算崩潰。
-    3. 引入 Diversity Filter：限制同一份文件最多只能有 k 個 Chunk 進入前段班。
-    """
     temp_scores = []
     
     # 1. 基礎計分
@@ -138,14 +130,13 @@ def advanced_reranker(query, documents, metadatas, distances, top_n=30, decay_ra
         # 綜合分數 (關鍵字權重 0.3, 向量 0.7)
         base_score = (norm_vector * 0.7) + (norm_kw * 0.3)
         
-        # 為了避免 meta 是 None 的情況
         safe_meta = meta if meta else {}
         doc_name = safe_meta.get("doc_name", "unknown")
 
         temp_scores.append({
             "index": i,
             "document": safe_doc,
-            "meta": safe_meta,       # <--- [修正點] 改回 "meta"
+            "meta": safe_meta,       
             "distance": safe_dist,
             "base_score": base_score,
             "doc_name": doc_name
@@ -200,7 +191,6 @@ def group_and_merge_results(candidates):
     
     for item in candidates:
         # 檢查是否為 TableItem (或之前標記為 TableItem 的節點)
-        # 注意：這裡依賴 metadata 中的 type 或 label
         node_type = item['meta'].get('type', item['meta'].get('label', ''))
         
         if node_type == 'TableItem':

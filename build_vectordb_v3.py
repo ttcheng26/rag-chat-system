@@ -14,7 +14,6 @@ COLLECTION_NAME = "regulations_rag"
 
 def split_text_by_window(text, chunk_size=800, overlap=100):
     """
-    簡單的滑動視窗切分：
     將長字串切成多個長度約 chunk_size 的片段，
     每個片段之間保留 overlap 重疊，以免切斷關鍵詞。
     """
@@ -53,8 +52,6 @@ class LocalJinaEmbeddingFunction(EmbeddingFunction):
             print(f"量化失敗: {e}")
 
     def __call__(self, input: Documents) -> Embeddings:
-        # Chroma 會呼叫這個函式來計算向量
-        # 我們轉成 list 回傳，並確保是 float 格式
         embeddings = self.model.encode(input).tolist()
         return embeddings
 
@@ -76,8 +73,6 @@ def serialize_node(node, parent_map, nodes_by_id):
     label = node['label']
     props = node['properties']
     
-    # --- [新增] 1. 往上追溯最頂層 Document 節點，抓取檔名 ---
-    # 目的：解決 112年 vs 113年 內容混淆問題，強制將檔名寫入 Embeddings
     doc_name = ""
     curr_id = node_id
     
@@ -96,7 +91,7 @@ def serialize_node(node, parent_map, nodes_by_id):
         depth_limit -= 1
     # -----------------------------------------------------
 
-    # --- [原有邏輯] 2. 抓取父節點與祖父節點作為上下文 ---
+    # --- 抓取父節點與祖父節點作為上下文 ---
     context_text = ""
     parent_id = parent_map.get(node_id)
     if parent_id:
@@ -111,10 +106,9 @@ def serialize_node(node, parent_map, nodes_by_id):
                     gp_name = gp_node['properties'].get('name', '')
                     context_text = f"[{gp_name}] " + context_text
 
-    # --- [修正內文邏輯] 3. 處理內文 ---
+    # --- 處理內文 ---
     text_content = ""
     if label == "Document":
-        # 🟢 【修正點】：把 "法規名稱" 改成 "文件名稱"
         text_content = f"文件名稱: {props.get('name', '')}"
         
     elif label == "Article":
@@ -130,52 +124,13 @@ def serialize_node(node, parent_map, nodes_by_id):
             parts.append(f"{clean_key}: {clean_val}")
         text_content = " ".join(parts)
 
-    # --- [修改] 4. 組合最終文字 ---
-    # 如果有抓到檔名（代表是子節點），就強制加在最前面
+    # --- 組合最終文字 ---
     if doc_name:
         final_text = f"【來源文件：{doc_name}】 {context_text} {text_content}".strip()
     else:
-        # 如果沒抓到檔名（代表它自己就是根節點，或是孤兒），就直接用 context + text
         final_text = f"{context_text} {text_content}".strip()
         
     return final_text
-
-# def serialize_node(node, parent_map, nodes_by_id):
-#     node_id = node['id']
-#     label = node['label']
-#     props = node['properties']
-    
-#     context_text = ""
-#     parent_id = parent_map.get(node_id)
-#     if parent_id:
-#         parent_node = nodes_by_id.get(parent_id)
-#         if parent_node:
-#             p_title = parent_node['properties'].get('title', '') or parent_node['properties'].get('name', '')
-#             context_text = f"[{p_title}] " + context_text
-#             grandparent_id = parent_map.get(parent_id)
-#             if grandparent_id:
-#                 gp_node = nodes_by_id.get(grandparent_id)
-#                 if gp_node:
-#                     gp_name = gp_node['properties'].get('name', '')
-#                     context_text = f"[{gp_name}] " + context_text
-
-#     text_content = ""
-#     if label == "Document":
-#         text_content = f"法規名稱: {props.get('name', '')}"
-#     elif label == "Article":
-#         text_content = f"{props.get('title', '')} {props.get('content', '')}"
-#         text_content = text_content.replace("關聯表格資料已轉化為 TableItem 子節點", "")
-#     elif label == "TableItem":
-#         parts = []
-#         for k, v in props.items():
-#             if not v or v.strip() == "---": continue
-#             clean_key = k.split('_')[0]
-#             clean_val = str(v).replace('\n', '，').replace('<br>', '，')
-#             parts.append(f"{clean_key}: {clean_val}")
-#         text_content = " ".join(parts)
-
-#     final_text = f"{context_text} {text_content}".strip()
-#     return final_text
 
 class VectorDBBuilder:
     def __init__(self, db_path="./chroma_db", model_path="./jina-model", collection_name="regulations_rag"):
@@ -208,7 +163,6 @@ class VectorDBBuilder:
         print("建立節點關聯索引...")
         parent_map, nodes_by_id = build_parent_map(graph_data)
 
-        # 【修正 1】 這裡統一使用 ids, documents, metadatas
         ids = []
         documents = []
         metadatas = []
@@ -221,7 +175,7 @@ class VectorDBBuilder:
         for node in nodes:
             if not node.get('properties'): continue
             
-            # 1. 5000字過濾 (針對 Section)
+            # 1. 過濾 (針對 Section)
             if node['label'] == 'Section':
                 raw_text = node['properties'].get('content') or node['properties'].get('full_content') or node['properties'].get('text') or ""
                 if len(str(raw_text)) > 5000:
@@ -232,9 +186,8 @@ class VectorDBBuilder:
             if not serialized_text.strip():
                 continue       
             
-            # --- [開始修改] 加入「切片」邏輯 ---
+            # --- 加入「切片」邏輯 ---
             
-            # 【修正 2】 迴圈內統一 append 到 ids, documents, metadatas
             if len(serialized_text) <= 1000:
                 # === A. 短節點直接加入 ===
                 ids.append(node['id'])
@@ -258,7 +211,7 @@ class VectorDBBuilder:
                 metadatas.append(meta)
 
             else:
-                # === B. 長節點進行切分 ===
+                # === 長節點進行切分 ===
                 print(f"  發現長節點 {node['id']} (長度 {len(serialized_text)})，進行切分...")
                 sub_chunks = split_text_by_window(serialized_text, chunk_size=800, overlap=100)
                 
@@ -290,9 +243,6 @@ class VectorDBBuilder:
                         meta['title'] = node['properties'].get('title', '')[:50]
                     metadatas.append(meta)
             
-            # --- [修改結束] ---
-
-        # 【修正 3】 寫入時變數名稱現在對應得上了
         batch_size = 10
         total = len(documents)
         print(f"準備寫入 {total} 筆資料...")

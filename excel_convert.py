@@ -3,12 +3,9 @@ import os
 import sys
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
-# ==========================================
-# 資料清洗核心 (保留此功能以優化輸出結果)
-# ==========================================
+
 def clean_dataframe(df):
     """
-    智慧清洗 DataFrame：
     1. 移除全空的欄位。
     2. 移除 'Unnamed' 且內容幾乎全空的垃圾欄位。
     3. 嘗試修正標題列錯位 (Header Misalignment)。
@@ -38,7 +35,7 @@ def clean_dataframe(df):
         
         # 如果新標題比舊標題更完整，就替換
         if empty_new_header < unnamed_headers:
-            print("   💡 偵測到標題列可能錯位，自動修正 Header...")
+            print("偵測到標題列可能錯位，自動修正 Header...")
             df = df[1:] # 移除第一列資料
             df.columns = new_header # 設定為新 Header
             # 再次清洗新標題中可能的 Unnamed
@@ -91,7 +88,6 @@ def excel_to_markdown(file_path):
             try:
                 markdown_table = df_clean.to_markdown(index=False)
             except ImportError:
-                # 如果使用者忘了裝 tabulate，回退到普通字串格式
                 markdown_table = df_clean.to_string(index=False)
                 
             markdown_output += markdown_table

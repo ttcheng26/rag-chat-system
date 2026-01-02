@@ -1,8 +1,8 @@
-import fitz  # PyMuPDF
+import fitz  
 import sys
 import os
 import base64
-import pymupdf4llm  # [新增] 專門處理表格與結構的套件
+import pymupdf4llm  
 from openai import OpenAI
 
 # --- 設定區 ---
@@ -153,9 +153,9 @@ if __name__ == "__main__":
                 f.write(final_md)
             print(f"\n 轉換完成！Markdown 已儲存至: {output_file}")
         else:
-            print("❌ 轉換結果為空。")
+            print("轉換結果為空。")
             
     except Exception as e:
         import traceback
         traceback.print_exc()
-        print(f"❌ 發生錯誤: {e}")
+        print(f"發生錯誤: {e}")

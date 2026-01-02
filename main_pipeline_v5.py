@@ -28,7 +28,6 @@ def process_single_file(filepath, builder):
     md_content = ""
     
     # --- 1. 解析階段 (Parsing) ---
-    # 這裡整合了 V4 的 PDF 支援與 V3 的簡潔邏輯
     try:
         # A. 如果是 PDF
         if file_ext == '.pdf':

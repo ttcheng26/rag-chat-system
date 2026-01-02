@@ -108,7 +108,7 @@ def process_table_node(table_node):
             safe_text = str(cell_text).replace('\n', '<br>').replace('\r', '')
             cleaned_row.append(safe_text)
         cleaned_grid.append(cleaned_row)
-    grid = cleaned_grid  # 替換原本的 grid
+    grid = cleaned_grid  
 
     md_output = "\n"
     if grid:
@@ -122,7 +122,6 @@ def process_table_node(table_node):
     
     return md_output + "\n"
 
-# --- [關鍵新增] 遞迴內容解析 ---
 
 def recursive_parse(node):
     """
@@ -130,7 +129,6 @@ def recursive_parse(node):
     """
     results = []
     
-    # 如果是純文字節點 (P, H)，直接取值
     tag_name = node.qname[1]
     
     if tag_name == 'h': # 標題
@@ -146,7 +144,6 @@ def recursive_parse(node):
         results.append(process_table_node(node))
         
     elif tag_name in ('list', 'list-item', 'section'): 
-        # [關鍵] 如果是列表或區塊，就鑽進去讀它的子節點
         for child in node.childNodes:
             results.extend(recursive_parse(child))
             
@@ -170,10 +167,8 @@ def parse_full_document(file_path):
 
 # --- 測試單一文件區塊 ---
 if __name__ == "__main__":
-    # 記得改成您的檔名
-    file_path = "數產署業務諮詢窗口 - 資安科(黃底).odt" 
-    # 或者用 file_convert.py 轉出來的那個檔名
-    
+    file_path = ".....odt" 
+
     try:
         final_markdown = parse_full_document(file_path)
         
@@ -186,5 +181,5 @@ if __name__ == "__main__":
     except Exception as e:
         import traceback
         traceback.print_exc()
-        print(f"\n❌ 發生錯誤: {e}", file=sys.stderr)
+        print(f"\n發生錯誤: {e}", file=sys.stderr)
 

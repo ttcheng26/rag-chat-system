@@ -49,10 +49,6 @@ def extract_table_content(table):
     return "\n".join(md_lines)
 
 def parse_docx_to_markdown(file_path):
-    """
-    【修改重點】主函式：直接回傳 Markdown 字串，而不是 Node List。
-    這樣外部呼叫者 (main_pipeline) 就不用處理節點轉換了。
-    """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"找不到檔案: {file_path}")
 
@@ -87,7 +83,7 @@ def parse_docx_to_markdown(file_path):
 
 if __name__ == "__main__":
     # 測試用
-    input_file = "期末執行成果報告-113資安跨域_審後版1224.docx" 
+    input_file = ".....docx" 
 
     md = parse_docx_to_markdown(input_file)
     print(f"解析完成")
