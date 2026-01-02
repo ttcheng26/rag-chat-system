@@ -259,7 +259,7 @@ class VectorDBBuilder:
 
 
 if __name__ == "__main__":
-    # 這是單檔測試用的
+
     with open("graph_data_final.json", 'r', encoding='utf-8') as f:
         data = json.load(f)
     builder = VectorDBBuilder()
