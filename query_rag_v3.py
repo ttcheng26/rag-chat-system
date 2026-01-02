@@ -470,7 +470,7 @@ def main():
                 model=LLM_MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
-                max_tokens=1024 
+                max_tokens=2048 
             )
             answer = response.choices[0].message.content
             print("\n" + "="*20 + " 回答 " + "="*20)
