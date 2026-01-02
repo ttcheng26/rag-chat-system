@@ -43,6 +43,7 @@ services:
       - ./data_files:/app/data_files
       - ./processed_data:/app/processed_data
       - ./jina-model:/app/jina-model
+      - ~/.cache/huggingface:/root/.cache/huggingface
     environment:
       - VLLM_API_BASE=http://vllm:8000/v1
       - VLLM_API_KEY=EMPTY

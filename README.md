@@ -123,8 +123,8 @@ docker run --rm --gpus all nvidia/cuda:12.0-base nvidia-smi
 ### 2️⃣ 複製專案
 
 ```bash
-git clone <repository-url>
-cd myrag
+git clone https://github.com/ttcheng26/rag-chat-system.git
+cd rag-chat-system
 ```
 
 ### 3️⃣ 準備 Embedding 模型

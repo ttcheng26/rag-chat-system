@@ -1,9 +1,7 @@
 #!/bin/bash
-
-# 確保進入虛擬環境
 source ~/myrag/myvenv/bin/activate
 
-# 啟動 vLLM (黃金參數版)
+# 啟動 vLLM 
 MODEL_NAME="RedHatAI/gemma-3-12b-it-FP8-dynamic"
 
 vllm serve $MODEL_NAME \

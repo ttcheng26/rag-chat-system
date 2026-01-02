@@ -41,6 +41,14 @@ if not os.path.exists(pipeline.DATA_DIR):
 DB_PATH = os.getenv("CHROMA_DB_PATH", "./chroma_db")
 COLLECTION_NAME = "regulations_rag"
 MODEL_PATH = os.getenv("EMBEDDING_MODEL_PATH", "./jina-model")
+print(f"正在載入 Embedding 模型: {MODEL_PATH} ...")
+
+# 如果本地模型不存在或不完整，從 HuggingFace 下載
+if not os.path.exists(MODEL_PATH) or not os.path.exists(os.path.join(MODEL_PATH, "config.json")):
+    print("本地模型不存在，從 HuggingFace 下載...")
+    MODEL_PATH = "jinaai/jina-embeddings-v3"
+
+embed_model = SentenceTransformer(MODEL_PATH, trust_remote_code=True, device='cpu')
 
 LLM_MODEL = os.getenv("VLLM_MODEL", "ISTA-DASLab/gemma-3-27b-it-GPTQ-4b-128g")
 API_BASE = os.getenv("VLLM_API_BASE", "http://localhost:8000/v1")
