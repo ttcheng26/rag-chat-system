@@ -1,0 +1,16 @@
+# 忽略本地建構產物
+.next/
+out/
+node_modules/
+
+# 開發檔案
+.git/
+*.md
+
+# IDE
+.vscode/
+.idea/
+
+# 測試
+coverage/
+.nyc_output/
