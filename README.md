@@ -130,8 +130,26 @@ cd myrag
 ### 3️⃣ 準備 Embedding 模型
 
 ```bash
-# 下載 Jina Embedding 模型至 ./jina-model 目錄
-# 或使用您現有的模型
+# 建立虛擬環境
+python3 -m venv myvenv
+source myvenv/bin/activate
+
+# 安裝必要套件
+pip install sentence-transformers einops
+
+# 下載 Jina Embedding 模型
+python3 -c "
+from sentence_transformers import SentenceTransformer
+print('下載 jina-model 中（約 1.2GB）...')
+model = SentenceTransformer('jinaai/jina-embeddings-v3', trust_remote_code=True)
+model.save('./jina-model')
+print('完成！')
+"
+
+# 退出虛擬環境
+deactivate
+
+# 確認模型已下載
 ls ./jina-model/
 # 應包含: config.json, model.safetensors, tokenizer.json 等
 ```

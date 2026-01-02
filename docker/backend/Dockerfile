@@ -39,7 +39,6 @@ COPY graph_chunker_v6.py .
 COPY pdf_convert.py .
 COPY docx_convert.py .
 COPY excel_convert.py .
-COPY file_convert.py .
 
 # 建立必要目錄
 RUN mkdir -p /app/chroma_db /app/data_files /app/processed_data /app/jina-model
