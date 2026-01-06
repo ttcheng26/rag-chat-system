@@ -1,0 +1,92 @@
+services:
+  # ============================================
+  # 服務 1: vLLM - LLM 推理引擎 (需要 GPU)
+  # ============================================
+  vllm:
+    build:
+      context: .
+      dockerfile: docker/vllm/Dockerfile
+    container_name: rag-vllm
+    ports:
+      - "8080:8000"
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    shm_size: '16gb'
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 600s
+    restart: unless-stopped
+
+  # ============================================
+  # 服務 2: RAG Backend - FastAPI 後端
+  # ============================================
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile
+    container_name: rag-backend
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./chroma_db:/app/chroma_db
+      - ./data_files:/app/data_files
+      - ./processed_data:/app/processed_data
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    deploy:
+        resources:
+          reservations:
+            devices:
+              - driver: nvidia
+                count: all
+                capabilities: [gpu]
+    environment:
+      - VLLM_API_BASE=http://vllm:8000/v1
+      - VLLM_API_KEY=EMPTY
+      - VLLM_MODEL=ISTA-DASLab/gemma-3-27b-it-GPTQ-4b-128g
+      - CHROMA_DB_PATH=/app/chroma_db
+      - EMBEDDING_MODEL_PATH=jinaai/jina-embeddings-v3
+    depends_on:
+      vllm:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  # ============================================
+  # 服務 3: Frontend - Next.js 前端
+  # ============================================
+  frontend:
+    build:
+      context: ./tainan-frontEnd_run
+      dockerfile: Dockerfile
+      args:
+        - BACKEND_URL=http://backend:8001
+    container_name: rag-frontend
+    ports:
+      - "3001:3001"
+    environment:
+      - BACKEND_URL=http://backend:8001
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  default:
+    name: rag-network

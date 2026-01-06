@@ -1,0 +1,26 @@
+# 環境變數（含 IP 等敏感資訊）
+.env
+
+# Python
+__pycache__/
+*.pyc
+myvenv/
+venv/
+
+# 資料檔案
+data_files/*
+!data_files/.gitkeep
+processed_data/*
+!processed_data/.gitkeep
+chroma_db/*
+!chroma_db/.gitkeep
+
+# 忽略 HuggingFace 模型快取
+.hf_cache/
+
+# Node.js
+node_modules/
+.next/
+
+# OS
+.DS_Store

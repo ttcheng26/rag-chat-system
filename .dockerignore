@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+myvenv/
+venv/
+ENV/
+.env.local
+
+# Node.js
+node_modules/
+.next/
+out/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Docker
+docker-compose*.yml
+Dockerfile*
+
+# 資料檔案 (會透過 volume 掛載)
+chroma_db/
+data_files/
+processed_data/
+
+# 大型檔案
+*.pdf
+*.docx
+*.xlsx
+*.zip
+*.tar.gz
+
+# 日誌
+*.log
+logs/
+
+# 暫存
+temp_data/
+.cache/
