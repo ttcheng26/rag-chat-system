@@ -4,7 +4,19 @@ import { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
+const API_BASE_URL = "/api";
+
 export default function Home() {
+  const MarkdownComponent = ReactMarkdown.default || ReactMarkdown;
+  const GfmPlugin = remarkGfm.default || remarkGfm;
+  // 登入相關狀態
+  const [token, setToken] = useState('');           // 存放在記憶體中的通行證
+  const [isLoggedIn, setIsLoggedIn] = useState(false); // 判斷是否已登入
+  const [role, setRole] = useState(''); // 目前登入者的身分 (root 或 user)
+  const [username, setUsername] = useState('');     // 登入框輸入的帳號
+  const [password, setPassword] = useState('');     // 登入框輸入的密碼
+  const [loginError, setLoginError] = useState(''); // 登入失敗顯示的錯誤訊息
+
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState(''); 
   const [progressMsg, setProgressMsg] = useState('');
@@ -27,7 +39,7 @@ export default function Home() {
 
   const [sessionId, setSessionId] = useState('');
 
-  const API_BASE_URL = "/api";
+  
 
   const showAlert = (message, type = 'info') => {
     setModalMessage(message);
@@ -38,7 +50,7 @@ export default function Home() {
 
   const fetchFiles = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/files`);
+      const res = await authFetch(`${API_BASE_URL}/files`);
       const data = await res.json();
       if (data.files) setFiles(data.files);
     } catch (e) {
@@ -49,14 +61,98 @@ export default function Home() {
   useEffect(() => {
     // 頁面載入時產生隨機 ID
     setSessionId(`session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
-    fetchFiles();
+    // 檢查 localStorage 有沒有存過的 Token
+    const savedToken = localStorage.getItem('access_token');
+    const savedRole = localStorage.getItem('user_role');
+    if (savedToken) {
+      setToken(savedToken);
+      if (savedRole) setRole(savedRole);
+      setIsLoggedIn(true);
+      fetchFiles(); 
+    }
   }, []);
+
+  useEffect(() => {
+    if (isLoggedIn && token) {
+        fetchFiles();
+    }
+  }, [isLoggedIn, token]);
+
+  // === 登入處理 ===
+  const handleLogin = async (e) => {
+    e.preventDefault(); // 防止表單重新整理
+    setLoginError('');
+    setStatus('登入中...');
+
+    // 準備要傳給後端的資料
+    const formData = new URLSearchParams();
+    formData.append('username', username);
+    formData.append('password', password);
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: formData,
+      });
+
+      if (!res.ok) throw new Error('帳號或密碼錯誤');
+
+      const data = await res.json();
+      const accessToken = data.access_token;
+
+      const userRole = data.role;
+
+      // 登入成功：存入 LocalStorage + 更新狀態
+      localStorage.setItem('access_token', accessToken);
+      localStorage.setItem('user_role', userRole);
+      setToken(accessToken);
+      setRole(userRole);
+      setIsLoggedIn(true);
+      setStatus('登入成功');
+      
+      // 登入後馬上更新檔案列表
+      fetchFiles(); 
+
+    } catch (err) {
+      setLoginError(err.message);
+      setStatus('登入失敗');
+    }
+  };
+
+  // === 登出處理 ===
+  const handleLogout = () => {
+    localStorage.removeItem('access_token'); // 清除瀏覽器紀錄
+    localStorage.removeItem('user_role');
+    setToken('');
+    setRole('');
+    setIsLoggedIn(false);
+    setFiles([]);     // 清空檔案列表 
+    setMessages('');  // 清空對話 
+    setUsername('');
+    setPassword('');
+    setStatus('已登出');
+  };
+
+  // 以後上傳或刪除，改用 authFetch 取代原本的 fetch
+  const authFetch = async (url, options = {}) => {
+    const headers = {
+      ...options.headers,
+      'Authorization': `Bearer ${token}`, // 自動加上通行證
+    };
+    return fetch(url, { ...options, headers });
+  };
 
   const handleUpload = async (e) => {
     if (!e.target.files || e.target.files.length === 0) return;
-    
+  
+    if (!isLoggedIn) {
+      showAlert('請先登入', 'error');
+      return;
+    }
+
     const selectedFiles = Array.from(e.target.files);
-    
+
     if (selectedFiles.length > 10) {
       showAlert('最多只能同時上傳 10 個檔案', 'error');
       e.target.value = '';
@@ -75,7 +171,7 @@ export default function Home() {
       formData.append('file', file);
 
       try {
-        const res = await fetch(`${API_BASE_URL}/upload`, {
+        const res = await authFetch(`${API_BASE_URL}/upload`, {
           method: 'POST',
           body: formData,
         });
@@ -86,10 +182,16 @@ export default function Home() {
           successCount++;
           setStatus(`⏳ 已上傳 ${successCount}/${selectedFiles.length} 個檔案，處理中...`);
         } else {
+          if (res.status === 401) throw new Error("憑證過期");
           failCount++;
         }
       } catch (error) {
         console.error(`上傳 ${file.name} 失敗:`, error);
+        if (error.message.includes("憑證過期")) {
+                handleLogout(); // 自動登出
+                showAlert("憑證過期，請重新登入", "error");
+                return; // 停止後續上傳
+        }
         failCount++;
       }
     }
@@ -179,7 +281,7 @@ export default function Home() {
     setDeleting(fileToDelete);
     
     try {
-      const res = await fetch(`${API_BASE_URL}/files?filename=${encodeURIComponent(fileToDelete)}`, {
+      const res = await authFetch(`${API_BASE_URL}/files?filename=${encodeURIComponent(fileToDelete)}`, {
         method: 'DELETE',
       });
       
@@ -187,6 +289,15 @@ export default function Home() {
         showAlert(`檔案「${fileToDelete}」已刪除`, 'success');
         fetchFiles();
       } else {
+        if (res.status === 401) {
+          handleLogout();
+          showAlert("登入逾時，請重新登入", "error");
+          return;
+        }
+        if (res.status === 403) {
+          showAlert("權限不足：只有管理員(root)可以刪除檔案", "error");
+          return;
+        }
         const data = await res.json();
         showAlert(`刪除失敗: ${data.detail || '未知錯誤'}`, 'error');
       }
@@ -232,8 +343,8 @@ export default function Home() {
         const { done, value } = await reader.read();
         if (done) break;
 
-        // const chunk = decoder.decode(value);
-        const chunk = decoder.decode(value, { stream: true });
+        const chunk = decoder.decode(value);
+        // const chunk = decoder.decode(value, { stream: true });
         const lines = chunk.split('\n');
         for (const line of lines) {
           if (line.startsWith('data: ')) {
@@ -276,9 +387,36 @@ export default function Home() {
     }
   };
 
+  if (!isLoggedIn) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-100 font-sans">
+        <div className="bg-white p-8 rounded-xl shadow-lg w-full max-w-md">
+          <h1 className="text-2xl font-bold mb-6 text-center text-gray-800">登入</h1>
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-gray-700 mb-2">帳號</label>
+              <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 outline-none text-black" placeholder="請輸入帳號" />
+            </div>
+            <div>
+              <label className="block text-gray-700 mb-2">密碼</label>
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-500 outline-none text-black" placeholder="請輸入密碼" />
+            </div>
+            {loginError && <div className="text-red-500 text-sm text-center">{loginError}</div>}
+            <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 transition">登入</button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="p-8 max-w-4xl mx-auto font-sans">
-      
+    <div className="p-8 max-w-4xl mx-auto font-sans relative">
+      <div className="absolute top-4 right-4">
+         <button onClick={handleLogout} className="text-sm text-gray-500 hover:text-red-500 underline">
+            登出 ({username || 'User'})
+         </button>
+      </div>
+
       {/* Toast 通知 */}
       {showModal && (
         <div className="fixed top-4 right-4 z-50 animate-slide-in">
@@ -350,6 +488,14 @@ export default function Home() {
       {/* 標題 */}
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">談參資料 Chat API 測試</h1>
+       {/* {role === 'root' && (
+          <button 
+            onClick={() => setShowKnowledge(!showKnowledge)}
+            className="text-sm bg-gray-200 px-3 py-1 rounded hover:bg-gray-300 text-gray-700"
+          >
+            {showKnowledge ? '隱藏知識庫' : '管理知識庫'}
+          </button>
+        )} */}
         <button 
           onClick={() => setShowKnowledge(!showKnowledge)}
           className="text-sm bg-gray-200 px-3 py-1 rounded hover:bg-gray-300 text-gray-700"
@@ -390,17 +536,19 @@ export default function Home() {
                       <span className="text-green-500">📄</span>
                       <span className="truncate text-sm" title={f}>{f}</span>
                     </div>
-                    <button
-                      onClick={() => confirmDelete(f)}
-                      disabled={deleting === f}
-                      className={`ml-2 px-3 py-1 text-sm rounded transition ${
-                        deleting === f 
-                          ? 'bg-gray-200 text-gray-400 cursor-not-allowed' 
-                          : 'bg-red-100 text-red-600 hover:bg-red-200'
-                      }`}
-                    >
-                      {deleting === f ? '刪除中...' : '🗑️ 刪除'}
-                    </button>
+                    {role === 'root' && (
+                      <button
+                        onClick={() => confirmDelete(f)}
+                        disabled={deleting === f}
+                        className={`ml-2 px-3 py-1 text-sm rounded transition ${
+                          deleting === f 
+                            ? 'bg-gray-200 text-gray-400 cursor-not-allowed' 
+                            : 'bg-red-100 text-red-600 hover:bg-red-200'
+                        }`}
+                      >
+                        {deleting === f ? '刪除中...' : '🗑️ 刪除'}
+                      </button>
+                    )}
                   </li>
                 ))
               ) : (
@@ -443,17 +591,17 @@ export default function Home() {
 
       <div className="border p-4 rounded bg-gray-50 min-h-[200px] text-black leading-relaxed overflow-auto">
         {messages ? (
-          <ReactMarkdown 
-            remarkPlugins={[remarkGfm]}
-            components={{
-              strong: ({node, ...props}) => <strong className="font-bold" {...props} />,
-              ul: ({node, ...props}) => <ul className="list-disc pl-5 my-2" {...props} />,
-              li: ({node, ...props}) => <li className="mb-1" {...props} />,
-              p: ({node, ...props}) => <p className="mb-2" {...props} />,
+          <MarkdownComponent  
+              remarkPlugins={[GfmPlugin]} 
+              components={{
+                strong: ({node, ...props}) => <strong className="font-bold" {...props} />,
+                ul: ({node, ...props}) => <ul className="list-disc pl-5 my-2" {...props} />,
+                li: ({node, ...props}) => <li className="mb-1" {...props} />,
+                p: ({node, ...props}) => <p className="mb-2" {...props} />,
             }}
           >
             {messages}
-          </ReactMarkdown>
+          </MarkdownComponent>
         ) : (
           <div className={`text-gray-400 flex items-center gap-2 ${isGenerating ? 'animate-pulse' : ''}`}>
              {isGenerating ? (

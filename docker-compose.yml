@@ -1,6 +1,6 @@
 services:
   # ============================================
-  # 服務 1: vLLM - LLM 推理引擎 (需要 GPU)
+  # 服務 1: vLLM - LLM 推理引擎
   # ============================================
   vllm:
     build:
@@ -30,7 +30,31 @@ services:
     restart: unless-stopped
 
   # ============================================
-  # 服務 2: RAG Backend - FastAPI 後端
+  # 服務 2: MySQL - 資料庫服務
+  # ============================================
+  db:
+    image: mysql:8.0
+    container_name: rag-db
+    ports:
+      - "3307:3306"
+    environment:
+      # 讀取.env 設定的變數
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command: --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ============================================
+  # 服務 3: RAG Backend - FastAPI 後端
   # ============================================
   backend:
     build:
@@ -57,8 +81,16 @@ services:
       - VLLM_MODEL=ISTA-DASLab/gemma-3-27b-it-GPTQ-4b-128g
       - CHROMA_DB_PATH=/app/chroma_db
       - EMBEDDING_MODEL_PATH=jinaai/jina-embeddings-v3
+      - DATABASE_URL=mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE}
+      - SECRET_KEY=${SECRET_KEY}
+      - ALGORITHM=HS256
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
     depends_on:
       vllm:
+        condition: service_healthy
+      db: 
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
@@ -69,7 +101,7 @@ services:
     restart: unless-stopped
 
   # ============================================
-  # 服務 3: Frontend - Next.js 前端
+  # 服務 4: Frontend - Next.js 前端
   # ============================================
   frontend:
     build:
@@ -90,3 +122,5 @@ services:
 networks:
   default:
     name: rag-network
+volumes:
+  mysql_data:

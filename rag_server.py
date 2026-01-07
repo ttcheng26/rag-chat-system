@@ -10,8 +10,18 @@ from pydantic import BaseModel
 from typing import Optional
 from urllib.parse import unquote
 
+from datetime import datetime, timedelta, timezone
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi import Depends, status
+from passlib.context import CryptContext
+from jose import JWTError, jwt
+from sqlalchemy import create_engine, Column, Integer, String, Boolean
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
+
 import chromadb
-from openai import OpenAI
+# from openai import OpenAI
+from openai import AsyncOpenAI
 from sentence_transformers import SentenceTransformer
 import numpy as np
 
@@ -22,8 +32,110 @@ import build_vectordb_v3 as db_builder
 from dotenv import load_dotenv
 load_dotenv()
 
-processing_status = {}
+# ==========================================
+# 資料庫設定
+# ==========================================
+# 1. 讀取連線字串
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    print("未偵測到 DATABASE_URL，請檢查 docker-compose.yml 設定")
 
+# 2. 讀取 JWT 設定
+SECRET_KEY = os.getenv("SECRET_KEY", "secret")
+ALGORITHM = os.getenv("ALGORITHM", "HS256")
+ACCESS_TOKEN_EXPIRE_MINUTES = 480  # Token 有效期 8 小時
+
+# 3. 建立資料庫引擎
+#SQLAlchemy 用來跟 MySQL 對話的核心物件
+engine = create_engine(DATABASE_URL)
+
+# 4. 建立 Session
+# 每個 API 請求進來，產生一個臨時Session
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# 5. 宣告 
+Base = declarative_base()
+
+# 6. 密碼加密
+# 用來把 "123456" 變成 "$2b$12$..." 這種亂碼
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# 7. 定義登入驗證機制
+# 如果要登入，請去打 "/token" 這個 API
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+# ==========================================
+# 定義資料表 (Schema)
+# ==========================================
+class User(Base):
+    __tablename__ = "users" # 資料庫裡的表名叫做 users
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(50), unique=True, index=True) # 帳號 
+    hashed_password = Column(String(255))                  # 密碼 (存亂碼)
+    role = Column(String(20), default="user")              # 角色: root 或 user
+
+# 8. 自動建立資料表
+# 程式啟動時，會去資料庫看有沒有 users 表，沒有就自動建立
+try:
+    Base.metadata.create_all(bind=engine)
+    print("資料庫連線成功，資料表 (users) 已確認。")
+except Exception as e:
+    print(f"資料庫連線失敗: {e}")
+    print("請確認 Docker 的 db 服務是否已啟動且健康 (Healthy)")
+
+# ==========================================
+# 驗證工具函式 (Helper Functions)
+# ==========================================
+# 比對密碼 (輸入的明碼 vs 資料庫的亂碼)
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
+
+# 產生密碼亂碼
+def get_password_hash(password):
+    return pwd_context.hash(password)
+
+# 產生 JWT Token 
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + (expires_delta if expires_delta else timedelta(minutes=15))
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+# Dependency: 取得資料庫連線
+# 這是一個產生器 (Generator)，用完會自動關閉連線 (db.close())
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# Dependency: 驗證目前使用者 (保護 API 用的守門員)
+# 只要 API 參數裡加上 current_user: User = Depends(get_current_user)
+# 這個函式就會自動檢查 Token 是否有效
+async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        # 解碼 Token
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    
+    # 去資料庫查這個人還在不在
+    user = db.query(User).filter(User.username == username).first()
+    if user is None:
+        raise credentials_exception
+    return user
+
+
+processing_status = {}
 def process_file_background(file_location: str, filename: str):
     """背景處理檔案"""
     try:
@@ -51,7 +163,8 @@ MAX_CONTEXT_CHARS = int(os.getenv("MAX_CONTEXT_CHARS", "20000"))
 
 # 1. 連接 LLM 
 print(f"連接 vLLM: {LLM_MODEL}")
-llm_client = OpenAI(base_url=API_BASE, api_key=API_KEY)
+# llm_client = OpenAI(base_url=API_BASE, api_key=API_KEY)
+llm_client = AsyncOpenAI(base_url=API_BASE, api_key=API_KEY)
 
 # 2. 初始化 RAG 建庫引擎 
 print("初始化 RAG 建庫引擎...")
@@ -66,7 +179,6 @@ print("模型與資料庫載入完成！")
 
 # --- FastAPI App 設定 ---
 app = FastAPI()
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -84,12 +196,69 @@ class ChatRequest(BaseModel):
 # ==========================================
 # 檔案管理 API
 # ==========================================
+@app.on_event("startup")
+def init_default_users():
+    print("檢查預設使用者帳號...")
+    db = SessionLocal()
+    try:
+        # 1. 檢查並建立 Root 管理員 (讀取環境變數，若無則用預設值)
+        default_admin = "root"
+        # 注意：這裡直接讀取環境變數的 ROOT 密碼
+        default_pwd = os.getenv("MYSQL_ROOT_PASSWORD", "root") 
+        
+        if not db.query(User).filter(User.username == default_admin).first():
+            print(f"[Init] 建立預設管理員: {default_admin}")
+            db.add(User(
+                username=default_admin,
+                hashed_password=get_password_hash(default_pwd),
+                role="root"
+            ))
+
+        # 2. 檢查並建立一般使用者
+        normal_user = os.getenv("MYSQL_USER", "user")
+        normal_pwd = os.getenv("MYSQL_PASSWORD", "user")
+        
+        if not db.query(User).filter(User.username == normal_user).first():
+            print(f"[Init] 建立預設使用者: {normal_user}")
+            db.add(User(
+                username=normal_user,
+                hashed_password=get_password_hash(normal_pwd),
+                role="user"
+            ))
+            
+        db.commit()
+        print("使用者帳號檢查完成")
+    except Exception as e:
+        print(f"初始化使用者失敗 (可能是資料庫未就緒): {e}")
+    finally:
+        db.close()
+
+@app.post("/token")
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    # 1. 找使用者
+    user = db.query(User).filter(User.username == form_data.username).first()
+    
+    # 2. 檢查密碼
+    if not user or not verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="帳號或密碼錯誤",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # 3. 發放 Token
+    access_token = create_access_token(
+        data={"sub": user.username, "role": user.role},
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
+    return {"access_token": access_token, "token_type": "bearer", "role": user.role}
+
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "service": "rag-backend"}
 
 @app.get("/files")
-def list_files():
+def list_files(current_user: User = Depends(get_current_user)):
     """列出目前知識庫中的檔案"""
     try:
         files = []
@@ -102,8 +271,12 @@ def list_files():
         return {"error": str(e)}
 
 @app.delete("/files")
-def delete_file(filename: str = Query(..., description="要刪除的檔案名稱")):
+def delete_file(filename: str = Query(..., description="要刪除的檔案名稱"), current_user: User = Depends(get_current_user)):
     """刪除檔案並從向量資料庫移除"""
+    if current_user.role != "root":
+        print(f"[權限不足] 使用者 {current_user.username} 嘗試刪除檔案")
+        raise HTTPException(status_code=403, detail="權限不足：只有管理員可以刪除檔案")
+    
     decoded_filename = unquote(filename)
     print(f"[刪除] 準備刪除檔案: {decoded_filename}")
     
@@ -157,7 +330,7 @@ def delete_file(filename: str = Query(..., description="要刪除的檔案名稱
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/upload")
-async def upload_file(file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks()):
+async def upload_file(file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks(), current_user: User = Depends(get_current_user)):
     """上傳檔案並自動觸發 RAG 建庫流程"""
     try:
         file_location = os.path.join(pipeline.DATA_DIR, file.filename)
@@ -443,7 +616,7 @@ async def stream_chat(request: ChatRequest):
 
             try:
                 # 使用串流 (Stream) 回傳給前端
-                stream = llm_client.chat.completions.create(
+                stream = await llm_client.chat.completions.create(
                     model=LLM_MODEL,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=request.temperature,
@@ -451,7 +624,7 @@ async def stream_chat(request: ChatRequest):
                     stream=True 
                 )
 
-                for chunk in stream:
+                async for chunk in stream:
                     content = chunk.choices[0].delta.content
                     if content:
                         full_response_log += content

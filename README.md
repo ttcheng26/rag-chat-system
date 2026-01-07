@@ -49,7 +49,7 @@ touch .env
 
 #請將以下內容填入 .env
 # --- LLM 設定 ---
-# 指定 vLLM 內部服務位置
+# 指定 vLLM 內部服務位置(可自行更改模型)
 VLLM_API_BASE=http://vllm:8000/v1
 VLLM_API_KEY=EMPTY
 # 使用的模型名稱 (需與 docker-compose 內一致)
@@ -61,6 +61,22 @@ CHROMA_DB_PATH=/app/chroma_db
 EMBEDDING_MODEL_PATH=jinaai/jina-embeddings-v3
 # 上下文長度限制
 MAX_CONTEXT_CHARS=20000
+
+# 以及MYSQL相關設定
+# === 資料庫設定 (MySQL) ===
+# 1. Root 密碼：資料庫最高權限管理員的密碼
+MYSQL_ROOT_PASSWORD=YOUR_ROOT_PASSWORD
+
+# 2. 資料庫名稱：我們要建立一個專門給這個 RAG 系統用的資料庫
+MYSQL_DATABASE=YOUR_MYSQL_NAME
+
+# 3. 一般使用者帳密：後端程式連線時用的帳號 (比 root 安全)
+MYSQL_USER=USER_NAME
+MYSQL_PASSWORD=USER_PASSWORD
+
+# 4. JWT 密鑰：這是一串亂碼，用來給登入憑證 (Token) 簽名加密的
+# 如果這串外洩，別人就可以偽造登入身分(eg. 一組 64 字元的隨機 16 進位碼)
+SECRET_KEY= Random,  please add it yourself
 ```
 
 ### 3. 啟動服務
